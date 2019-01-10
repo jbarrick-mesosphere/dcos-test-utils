@@ -8,6 +8,7 @@ the :class:`~dcos_test_utils.dcos_api.DcosApiSession` object for direct API acce
 import logging
 import os
 import platform
+import re
 import shutil
 import stat
 import subprocess
@@ -18,7 +19,40 @@ import requests
 
 log = logging.getLogger(__name__)
 
-DCOS_CLI_URL = os.getenv('DCOS_CLI_URL', 'https://downloads.dcos.io/binaries/cli/linux/x86-64/dcos-1.12/dcos')
+
+def _get_dcos_cli_url():
+    """ This returns the DC/OS CLI URL based on the current DC/OS version.
+
+        The DC/OS version is read from gen/calc.py. For DC/OS < 1.14, it will
+        return https://downloads.dcos.io/binaries/cli/linux/x86-64/dcos-1.XX/dcos
+        with the appropriate version. Starting from DC/OS 1.14 it will return the
+        DC/OS version agnostic CLI URL.
+
+        The URL can be overwritten through the DCOS_CLI_URL env var.
+    """
+    download_url = os.getenv('DCOS_CLI_URL')
+    if download_url:
+        return download_url
+
+    try:
+        from gen.calc import DCOS_VERSION
+        version = re.compile('(\d+)\.(\d+)').match(DCOS_VERSION)
+    except ImportError:
+        # This would happen when dcos-test-utils is not run in a DC/OS environment.
+        # In such cases we skip version detection and fallback to the "latest" CLI.
+        # Users can still specify a CLI URL through the DCOS_CLI_URL env var.
+        pass
+    else:
+        if version:
+            major = version.group(1)
+            minor = version.group(2)
+            if int(major) == 1 and int(minor) < 14:
+                return 'https://downloads.dcos.io/binaries/cli/linux/x86-64/dcos-{}.{}/dcos'.format(major, minor)
+
+    return 'https://downloads.dcos.io/cli/releases/binaries/dcos/linux/x86-64/latest/dcos'
+
+
+DCOS_CLI_URL = _get_dcos_cli_url()
 
 
 class DcosCli():
