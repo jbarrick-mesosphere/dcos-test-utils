@@ -1,3 +1,4 @@
+import logging
 import datetime
 import json
 import os
@@ -5,7 +6,7 @@ import pytest
 
 from typing import Any
 from _pytest.python import Function
-from dcos_test_utils import dcos_api, enterprise, logger
+from dcos_test_utils import dcos_api, enterprise, logger, tracer
 
 logger.setup(os.getenv('LOG_LEVEL', 'DEBUG'))
 
@@ -60,6 +61,9 @@ def _write_xfailflake_report(tests):
 def pytest_addoption(parser):
     parser.addoption("--xfailflake-report", action="store_true",
                      help="Write a report of all tests marked flakey using the xfailflake marker to xfailflake.json.")
+    parser.addoption("--disable-tracing", action="store_true", help="If set, dcos-test-utils will not attempt to export a trace of requests made.")
+    parser.addoption("--zipkin", default="", help="Address of Zipkin API to export traces to.")
+    parser.addoption("--trace-tags", action="append", help="Tags to append to traces.", required=False)
 
 
 def pytest_collection_modifyitems(session, config, items):
@@ -109,3 +113,39 @@ def _add_xfail_markers(item: Function) -> None:
 
 def pytest_runtest_setup(item: Any) -> None:
     _add_xfail_markers(item)
+
+
+def pytest_configure(config):
+    """
+    Initialize the distributed tracer with the desired settings.
+    """
+    tracer.tracer(config.getoption('--disable-tracing'), config.getoption('--zipkin'), config.getoption('--trace-tags'))
+
+
+@pytest.hookimpl(tryfirst=True, hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """
+    Attach a test result to the test item so that trace_tests can add it as an attribute.
+    """
+    outcome = yield
+
+    result = outcome.get_result()
+
+    setattr(item, 'test_status', {
+        "result": result.outcome,
+    })
+
+
+@pytest.fixture(autouse=True)
+def trace_tests(request):
+    """
+    A fixture that is automatically added to tests to start a trace. All spans created inside of the test will be children
+    of the span created here.
+    """
+    with tracer.start_span(request.node.name) as span:
+        yield
+
+        if not span:
+            return
+
+        span.add_attribute('pytest.result', request.node.test_status['result'])

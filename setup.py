@@ -19,7 +19,10 @@ setup(
         'py',
         'pytest',
         'requests',
-        'retrying'],
+        'retrying',
+        'opencensus',
+        'opencensus-ext-requests',
+        'opencensus-ext-zipkin'],
     entry_points={
         'pytest11': [
             'pytest-dcos = pytest_dcos.plugin']}
